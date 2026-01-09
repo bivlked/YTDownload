@@ -1,0 +1,52 @@
+# Executables (скачанные компоненты - не должны быть в репозитории)
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe
+
+# Cookies (личные данные - НИКОГДА не коммитить!)
+cookies-youtube.txt
+cookies*.txt
+*.cookies
+
+# Скачанные видео и аудио файлы
+downloaded*.mkv
+downloaded*.mp4
+downloaded*.webm
+video*.*
+audio*.*
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.opus
+*.mp3
+*.aac
+
+# Временные файлы
+_tmp_*
+*.tmp
+*.temp
+
+# Логи yt-dlp
+*.log
+*.part
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# PowerShell
+*.ps1~
+*.swp
+*.bak
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
