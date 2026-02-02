@@ -10,6 +10,7 @@ ytdlp.ps1 — безопасный помощник для yt-dlp + ffmpeg в т
 Режимы:
   .\ytdlp.ps1 -Setup [-Force]
   .\ytdlp.ps1 "URL"
+  .\ytdlp.ps1 -Mp4 "URL"
   .\ytdlp.ps1 -Video "URL"
   .\ytdlp.ps1 -Audio "URL"
 #>
@@ -31,6 +32,10 @@ param(
 
     [Parameter(ParameterSetName = 'Audio', Mandatory = $true)]
     [switch] $Audio,
+
+    # Output MP4 instead of MKV (limits to H.264+AAC, max 1080p)
+    [Parameter(ParameterSetName = 'Full')]
+    [switch] $Mp4,
 
     # Overwrite existing binaries in -Setup
     [Parameter(ParameterSetName = 'Setup')]
@@ -165,6 +170,13 @@ function Show-Usage {
     Write-Host "     .\ytdlp.ps1 -Audio ""https://youtube.com/watch?v=...""" -ForegroundColor Yellow
     Write-Host "        Скачает максимально возможное аудио (без видео). Приоритет: формат 251 (Opus), fallback на best." -ForegroundColor Gray
     Write-Host "        Имя файла: audio.webm, audio001.opus, audio002.m4a, ..." -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host "  📼 " -NoNewline -ForegroundColor Cyan
+    Write-Host "Скачать в формате MP4 (совместимость):" -ForegroundColor White
+    Write-Host "     .\ytdlp.ps1 -Mp4 ""https://youtube.com/watch?v=...""" -ForegroundColor Yellow
+    Write-Host "        Скачает H.264 видео + AAC аудио в downloaded.mp4 (макс. 1080p)." -ForegroundColor Gray
+    Write-Host "        Для ТВ, телефонов и устройств, не поддерживающих MKV/VP9/Opus." -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -647,17 +659,34 @@ Write-Info "Папка: $WorkDir"
 Write-Host ""
 
 if ($PSCmdlet.ParameterSetName -eq 'Full') {
-    $outFile = Get-NextNameFixedExt -Base 'downloaded' -Ext 'mkv' -Kind 'Full'
-    Write-Info "📁 Файл вывода: $(Split-Path -Leaf $outFile)"
-    Write-Info "🎬 Режим: видео+аудио (макс. качество) + объединение без перекодирования"
-    Write-Info "🎵 Аудио-приоритет: 251 (Opus), иначе best audio"
-    Write-Host ""
+    if ($Mp4) {
+        # MP4 mode: H.264 video + AAC audio (max 1080p, but universal compatibility)
+        $outFile = Get-NextNameFixedExt -Base 'downloaded' -Ext 'mp4' -Kind 'Full'
+        Write-Info "📁 Файл вывода: $(Split-Path -Leaf $outFile)"
+        Write-Info "🎬 Режим: видео+аудио (MP4-совместимый, H.264+AAC)"
+        Write-Info "🎵 Аудио: формат 140 (AAC 128k)"
+        Write-Warn "⚠️  MP4 режим: макс. 1080p, только H.264 видео"
+        Write-Host ""
 
-    $format = 'bv*+251/bv*+ba/b'
+        # H.264 video + AAC audio (format 140), fallback to best mp4
+        $format = 'bv*[vcodec^=avc1]+140/bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]'
+        $mergeFormat = 'mp4'
+    } else {
+        # Default MKV mode: best quality (VP9/AV1 + Opus)
+        $outFile = Get-NextNameFixedExt -Base 'downloaded' -Ext 'mkv' -Kind 'Full'
+        Write-Info "📁 Файл вывода: $(Split-Path -Leaf $outFile)"
+        Write-Info "🎬 Режим: видео+аудио (макс. качество) + объединение без перекодирования"
+        Write-Info "🎵 Аудио-приоритет: 251 (Opus), иначе best audio"
+        Write-Host ""
+
+        $format = 'bv*+251/bv*+ba/b'
+        $mergeFormat = 'mkv'
+    }
+
     & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
         -f $format `
-        --merge-output-format mkv `
+        --merge-output-format $mergeFormat `
         -o $outFile `
         $Url
 
