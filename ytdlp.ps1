@@ -114,6 +114,7 @@ function Test-YouTubeUrl {
         'www.youtube.com',
         'm.youtube.com',
         'music.youtube.com',
+        'www.youtube-nocookie.com',  # Privacy-enhanced embed domain
         'youtu.be'
     )
 
@@ -127,11 +128,16 @@ function Test-YouTubeUrl {
         return $uri.AbsolutePath -match '^/[\w-]+'
     }
 
-    # Handle youtube.com URLs
+    # Handle youtube.com and youtube-nocookie.com URLs
     $path = $uri.AbsolutePath.ToLower()
 
-    # Direct video paths: /shorts/ID, /live/ID, /embed/ID
-    if ($path -match '^/(shorts|live|embed)/[\w-]+') {
+    # Direct video paths: /shorts/ID, /live/ID, /embed/ID, /clip/ID
+    if ($path -match '^/(shorts|live|embed|clip)/[\w-]+') {
+        return $true
+    }
+
+    # Channel paths with video content: /@channel/live, /@channel/shorts/ID, etc.
+    if ($path -match '^/@[\w.-]+/(live|shorts/[\w-]+)') {
         return $true
     }
 
@@ -141,10 +147,10 @@ function Test-YouTubeUrl {
         $query = $uri.Query.TrimStart('?')
         if (-not $query) { return $false }
 
-        # Split query into key=value pairs and look for 'v'
+        # Split query into key=value pairs and look for 'v' (case-insensitive)
         foreach ($pair in $query -split '&') {
             $kv = $pair -split '=', 2
-            if ($kv.Count -ge 1 -and $kv[0] -eq 'v' -and $kv.Count -eq 2 -and $kv[1] -match '^[\w-]+') {
+            if ($kv.Count -ge 1 -and $kv[0] -ieq 'v' -and $kv.Count -eq 2 -and $kv[1] -match '^[\w-]+') {
                 return $true
             }
         }
@@ -266,15 +272,23 @@ function Get-NextNameFixedExt {
         throw "Не удалось найти свободное имя файла после $maxIterations попыток"
     } else {
         # video.%(ext)s or video001.%(ext)s ...
-        $anyFirst = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter ($Base + '.*') -ErrorAction SilentlyContinue)
-        if ($anyFirst.Count -eq 0) {
+        # Optimization: collect all base names once into HashSet (O(n) instead of O(n²))
+        $existingBaseNames = [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+        Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $null = $existingBaseNames.Add($_.BaseName)
+        }
+
+        # Check base name without number first
+        if (-not $existingBaseNames.Contains($Base)) {
             return Join-Path $WorkDir ("{0}.%(ext)s" -f $Base)
         }
 
+        # Find next available numbered name
         for ($i = 1; $i -lt $maxIterations; $i++) {
             $prefix = "{0}{1}" -f $Base, $i.ToString('000')
-            $any = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter ($prefix + '.*') -ErrorAction SilentlyContinue)
-            if ($any.Count -eq 0) {
+            if (-not $existingBaseNames.Contains($prefix)) {
                 return Join-Path $WorkDir ("{0}.%(ext)s" -f $prefix)
             }
         }
@@ -299,7 +313,8 @@ function Download-File {
 
     Write-Info "Скачиваю: $Url"
     try {
-        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+        # Note: -UseBasicParsing is default in PS7, removed for clarity
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile
     }
     catch {
         $errorMsg = $_.Exception.Message
@@ -720,8 +735,10 @@ if (-not (Test-Path -LiteralPath $Cookies)) {
 $health = Test-CookiesFileLocalHealth -Path $Cookies
 Show-CookieHealthSummary -Health $health
 
-if (-not $health.HasAnyCookieLines -or -not $health.HasKeyCookies -or $health.KeyCookiesExpired) {
-    Write-Warn "Локальная проверка показывает потенциальную проблему с cookies. Пытаюсь онлайн-проверку по указанному URL."
+# Determine if online check is needed
+$cookiesLookHealthy = $health.HasHeader -and $health.HasAnyCookieLines -and $health.HasKeyCookies -and (-not $health.KeyCookiesExpired)
+if (-not $cookiesLookHealthy) {
+    Write-Warn "Локальная проверка показывает потенциальную проблему с cookies."
     Write-Host ""
 }
 
@@ -733,22 +750,30 @@ if (-not (Test-YouTubeUrl -Url $Url)) {
     Write-Err "Указанный URL не похож на действительную ссылку YouTube."
     Write-Info "Поддерживаемые домены:"
     Write-Info "  • youtube.com, www.youtube.com, m.youtube.com, music.youtube.com"
+    Write-Info "  • www.youtube-nocookie.com (embed)"
     Write-Info "  • youtu.be (короткие ссылки)"
     Write-Info "Поддерживаемые форматы:"
     Write-Info "  • https://www.youtube.com/watch?v=VIDEO_ID"
-    Write-Info "  • https://www.youtube.com/watch?param=value&v=VIDEO_ID"
     Write-Info "  • https://youtu.be/VIDEO_ID"
     Write-Info "  • https://www.youtube.com/shorts/VIDEO_ID"
     Write-Info "  • https://www.youtube.com/live/VIDEO_ID"
+    Write-Info "  • https://www.youtube.com/clip/CLIP_ID"
+    Write-Info "  • https://www.youtube.com/@Channel/live"
     Write-Host ""
     Write-Info "Ваш URL: $Url"
     Write-Warn "Если это действительно YouTube видео, пожалуйста, скопируйте полный URL из адресной строки браузера."
     exit 5
 }
 
-# Online cookie validation for the given URL (fast, no media download)
-if (-not (Test-CookiesOnlineForUrl -UrlToTest $Url)) {
-    exit 4
+# Online cookie validation only if local check shows potential issues
+# Skip if cookies look healthy to avoid unnecessary network requests
+if (-not $cookiesLookHealthy) {
+    if (-not (Test-CookiesOnlineForUrl -UrlToTest $Url)) {
+        exit 4
+    }
+} else {
+    Write-Info "Cookies выглядят корректно, пропускаю онлайн-проверку."
+    Write-Host ""
 }
 
 # ----------------------------
@@ -804,9 +829,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Video') {
     $outTemplate = Get-NextNameFixedExt -Base 'video' -Kind 'Video'
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($outTemplate).Replace('.%(ext)s', '')
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎬 Режим: только видео (без аудио), макс. качество"
     Write-Host ""
+
+    $startTime = Get-Date
 
     & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
@@ -817,7 +845,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         Write-Host ""
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "video*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        # Find file created after download start with matching base name
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.BaseName -eq $baseName -and $_.CreationTime -ge $startTime } |
+            Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
@@ -832,9 +863,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     $outTemplate = Get-NextNameFixedExt -Base 'audio' -Kind 'Audio'
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($outTemplate).Replace('.%(ext)s', '')
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎵 Режим: только аудио (без видео), приоритет: 251 (Opus)"
     Write-Host ""
+
+    $startTime = Get-Date
 
     & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
@@ -845,7 +879,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         Write-Host ""
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "audio*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        # Find file created after download start with matching base name
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.BaseName -eq $baseName -and $_.CreationTime -ge $startTime } |
+            Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
