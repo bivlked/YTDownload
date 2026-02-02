@@ -142,6 +142,12 @@ function Test-YouTubeUrl {
         return $true
     }
 
+    # Legacy channel paths: /channel/ID/live, /c/name/live, /user/name/live
+    # These are valid YouTube URLs that yt-dlp can handle
+    if ($path -match '^/(channel|c|user)/[\w.-]+/(live|shorts/[\w-]+)') {
+        return $true
+    }
+
     # Watch page: /watch with v= parameter (in any position in query string)
     if ($path -eq '/watch') {
         # Parse query string to find 'v' parameter regardless of position
@@ -484,8 +490,15 @@ function Get-CookieLines {
         [string]$Path
     )
 
+    # Filter out comments but KEEP #HttpOnly_ lines (they are valid cookies, not comments!)
+    # Netscape format uses #HttpOnly_ prefix for HttpOnly cookies
     Get-Content -LiteralPath $Path -ErrorAction Stop |
-        Where-Object { $_ -and ($_ -notmatch '^\s*#') }
+        Where-Object {
+            $_ -and (
+                ($_ -notmatch '^\s*#') -or      # Regular lines (not comments)
+                ($_ -match '^#HttpOnly_')        # #HttpOnly_ prefix = valid cookie
+            )
+        }
 }
 
 function ConvertFrom-NetscapeCookieLine {
@@ -497,7 +510,14 @@ function ConvertFrom-NetscapeCookieLine {
     )
 
     # Netscape format: domain \t flag \t path \t secure \t expiry \t name \t value
-    $parts = $Line -split "`t", 7
+    # Handle #HttpOnly_ prefix: browsers export HttpOnly cookies with this prefix
+    # Example: #HttpOnly_.youtube.com  TRUE  /  TRUE  1702000000  HSID  value
+    $normalizedLine = $Line
+    if ($normalizedLine -match '^#HttpOnly_') {
+        $normalizedLine = $normalizedLine -replace '^#HttpOnly_', ''
+    }
+
+    $parts = $normalizedLine -split "`t", 7
     if ($parts.Count -lt 7) { return $null }
 
     [pscustomobject]@{
@@ -560,11 +580,11 @@ function Test-CookiesFileLocalHealth {
         '__Secure-1PSIDTS','__Secure-3PSIDTS','__Secure-YEC','__Secure-ROLLOUT_TOKEN'
     )
 
-    $parsed = @()
-    foreach ($l in $lines) {
+    # Use foreach expression for O(n) complexity instead of += which is O(n²)
+    $parsed = @(foreach ($l in $lines) {
         $p = ConvertFrom-NetscapeCookieLine -Line $l
-        if ($null -ne $p) { $parsed += $p }
-    }
+        if ($null -ne $p) { $p }
+    })
 
     # Force arrays so .Count always exists
     # Filter by both name AND domain (.youtube.com) to avoid false positives from other Google cookies
@@ -726,10 +746,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Help') {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $YtDlp) -or -not (Test-Path -LiteralPath $Ffmpeg) -or -not (Test-Path -LiteralPath $Ffprobe)) {
-    Write-Err "Не найдены yt-dlp.exe / ffmpeg.exe / ffprobe.exe в текущей папке."
+if (-not (Test-Path -LiteralPath $YtDlp) -or -not (Test-Path -LiteralPath $Ffmpeg)) {
+    Write-Err "Не найдены yt-dlp.exe / ffmpeg.exe в текущей папке."
     Write-Info "Запустите: .\ytdlp.ps1 -Setup  (или положите файлы вручную)"
     exit 2
+}
+
+# ffprobe is optional for downloading (only used for media analysis/diagnostics)
+if (-not (Test-Path -LiteralPath $Ffprobe)) {
+    Write-Warn "ffprobe.exe не найден — некоторые функции анализа недоступны (скачивание будет работать)."
 }
 
 if (-not (Test-Path -LiteralPath $Cookies)) {
@@ -758,7 +783,7 @@ if (-not (Test-YouTubeUrl -Url $Url)) {
     Write-Err "Указанный URL не похож на действительную ссылку YouTube."
     Write-Info "Поддерживаемые домены:"
     Write-Info "  • youtube.com, www.youtube.com, m.youtube.com, music.youtube.com"
-    Write-Info "  • www.youtube-nocookie.com (embed)"
+    Write-Info "  • youtube-nocookie.com, www.youtube-nocookie.com (embed)"
     Write-Info "  • youtu.be (короткие ссылки)"
     Write-Info "Поддерживаемые форматы:"
     Write-Info "  • https://www.youtube.com/watch?v=VIDEO_ID"
@@ -837,7 +862,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Video') {
     $outTemplate = Get-NextNameFixedExt -Base 'video' -Kind 'Video'
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($outTemplate).Replace('.%(ext)s', '')
+    # Extract base name by removing .%(ext)s suffix from template filename
+    $baseName = ([System.IO.Path]::GetFileName($outTemplate)) -replace '\.%\(ext\)s$', ''
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎬 Режим: только видео (без аудио), макс. качество"
     Write-Host ""
@@ -854,9 +880,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
     if ($exitCode -eq 0) {
         Write-Host ""
         # Find file modified after download start with matching base name
+        # Using -Filter for performance in large directories
         # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $baseName -and $_.LastWriteTime -ge $startTime } |
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "$baseName.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $startTime } |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
@@ -872,7 +899,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     $outTemplate = Get-NextNameFixedExt -Base 'audio' -Kind 'Audio'
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($outTemplate).Replace('.%(ext)s', '')
+    # Extract base name by removing .%(ext)s suffix from template filename
+    $baseName = ([System.IO.Path]::GetFileName($outTemplate)) -replace '\.%\(ext\)s$', ''
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎵 Режим: только аудио (без видео), приоритет: 251 (Opus)"
     Write-Host ""
@@ -889,9 +917,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     if ($exitCode -eq 0) {
         Write-Host ""
         # Find file modified after download start with matching base name
+        # Using -Filter for performance in large directories
         # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $baseName -and $_.LastWriteTime -ge $startTime } |
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "$baseName.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $startTime } |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
