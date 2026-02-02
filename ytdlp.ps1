@@ -95,11 +95,63 @@ function Test-YouTubeUrl {
         [string]$Url
     )
 
-    # Combined YouTube URL pattern (youtube.com, youtu.be, m.youtube.com, etc.)
-    # Matches: /watch?v=, /shorts/, /live/, /embed/, youtu.be/
-    $pattern = '^https?://(?:(?:www\.|m\.)?youtube\.com/(?:watch\?v=|shorts/|live/|embed/)|youtu\.be/)[\w-]+'
+    # Parse URL using [System.Uri] for robust handling of query parameters
+    try {
+        $uri = [System.Uri]::new($Url)
+    }
+    catch {
+        return $false
+    }
 
-    return $Url -match $pattern
+    # Validate scheme
+    if ($uri.Scheme -notin @('http', 'https')) {
+        return $false
+    }
+
+    # Valid YouTube domains
+    $validHosts = @(
+        'youtube.com',
+        'www.youtube.com',
+        'm.youtube.com',
+        'music.youtube.com',
+        'youtu.be'
+    )
+
+    if ($uri.Host -notin $validHosts) {
+        return $false
+    }
+
+    # Handle youtu.be short URLs: youtu.be/VIDEO_ID
+    if ($uri.Host -eq 'youtu.be') {
+        # Path should be /VIDEO_ID (at least /X)
+        return $uri.AbsolutePath -match '^/[\w-]+'
+    }
+
+    # Handle youtube.com URLs
+    $path = $uri.AbsolutePath.ToLower()
+
+    # Direct video paths: /shorts/ID, /live/ID, /embed/ID
+    if ($path -match '^/(shorts|live|embed)/[\w-]+') {
+        return $true
+    }
+
+    # Watch page: /watch with v= parameter (in any position in query string)
+    if ($path -eq '/watch') {
+        # Parse query string to find 'v' parameter regardless of position
+        $query = $uri.Query.TrimStart('?')
+        if (-not $query) { return $false }
+
+        # Split query into key=value pairs and look for 'v'
+        foreach ($pair in $query -split '&') {
+            $kv = $pair -split '=', 2
+            if ($kv.Count -ge 1 -and $kv[0] -eq 'v' -and $kv.Count -eq 2 -and $kv[1] -match '^[\w-]+') {
+                return $true
+            }
+        }
+        return $false
+    }
+
+    return $false
 }
 
 # ----------------------------
@@ -187,7 +239,8 @@ function Get-NextNameFixedExt {
         [Parameter(Mandatory)]
         [string]$Base,
 
-        [Parameter(Mandatory)]
+        # Extension is required for 'Full' mode, ignored for 'Video'/'Audio' (yt-dlp determines extension)
+        [Parameter()]
         [string]$Ext,
 
         [Parameter(Mandatory)]
@@ -196,9 +249,12 @@ function Get-NextNameFixedExt {
     )
 
     $maxIterations = 10000
-    $ext = $Ext.TrimStart('.')
 
     if ($Kind -eq 'Full') {
+        if (-not $Ext) {
+            throw "Параметр -Ext обязателен для режима 'Full'"
+        }
+        $ext = $Ext.TrimStart('.')
         # downloaded.mkv, then downloaded000.mkv, downloaded001.mkv ...
         $first = Join-Path $WorkDir ("{0}.{1}" -f $Base, $ext)
         if (-not (Test-Path -LiteralPath $first)) { return $first }
@@ -459,11 +515,14 @@ function Test-CookiesFileLocalHealth {
     }
     $result.Exists = $true
 
-    $head = @(Get-Content -LiteralPath $Path -TotalCount 3 -ErrorAction SilentlyContinue)
-    if ($head.Count -gt 0 -and ($head[0] -match 'Netscape')) {
+    # Read first 10 lines and search for "Netscape" in any of them
+    # This handles: empty lines at start, BOM, other comments before the header
+    $head = @(Get-Content -LiteralPath $Path -TotalCount 10 -ErrorAction SilentlyContinue)
+    $hasNetscapeHeader = @($head | Where-Object { $_ -match 'Netscape' }).Count -gt 0
+    if ($hasNetscapeHeader) {
         $result.HasHeader = $true
     } else {
-        $result.Notes += "Заголовок не похож на Netscape cookies.txt."
+        $result.Notes += "Заголовок не похож на Netscape cookies.txt (не найдено 'Netscape' в первых 10 строках)."
     }
 
     $lines = @(Get-CookieLines -Path $Path)
@@ -672,12 +731,15 @@ if (-not $health.HasAnyCookieLines -or -not $health.HasKeyCookies -or $health.Ke
 if (-not (Test-YouTubeUrl -Url $Url)) {
     Write-Rule "❌ Ошибка валидации URL"
     Write-Err "Указанный URL не похож на действительную ссылку YouTube."
+    Write-Info "Поддерживаемые домены:"
+    Write-Info "  • youtube.com, www.youtube.com, m.youtube.com, music.youtube.com"
+    Write-Info "  • youtu.be (короткие ссылки)"
     Write-Info "Поддерживаемые форматы:"
     Write-Info "  • https://www.youtube.com/watch?v=VIDEO_ID"
+    Write-Info "  • https://www.youtube.com/watch?param=value&v=VIDEO_ID"
     Write-Info "  • https://youtu.be/VIDEO_ID"
     Write-Info "  • https://www.youtube.com/shorts/VIDEO_ID"
     Write-Info "  • https://www.youtube.com/live/VIDEO_ID"
-    Write-Info "  • https://m.youtube.com/watch?v=VIDEO_ID"
     Write-Host ""
     Write-Info "Ваш URL: $Url"
     Write-Warn "Если это действительно YouTube видео, пожалуйста, скопируйте полный URL из адресной строки браузера."
@@ -741,7 +803,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Video') {
-    $outTemplate = Get-NextNameFixedExt -Base 'video' -Ext 'auto' -Kind 'Video'
+    $outTemplate = Get-NextNameFixedExt -Base 'video' -Kind 'Video'
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎬 Режим: только видео (без аудио), макс. качество"
     Write-Host ""
@@ -769,7 +831,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Audio') {
-    $outTemplate = Get-NextNameFixedExt -Base 'audio' -Ext 'auto' -Kind 'Audio'
+    $outTemplate = Get-NextNameFixedExt -Base 'audio' -Kind 'Audio'
     Write-Info "📁 Вывод-шаблон: $(Split-Path -Leaf $outTemplate)"
     Write-Info "🎵 Режим: только аудио (без видео), приоритет: 251 (Opus)"
     Write-Host ""
