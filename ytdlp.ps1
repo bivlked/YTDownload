@@ -1,4 +1,6 @@
-<# 
+#Requires -Version 7.0
+
+<#
 ytdlp.ps1 — безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7+)
 
 Ожидает рядом (в текущем каталоге):
@@ -25,6 +27,7 @@ param(
     [Parameter(ParameterSetName = 'Full', Position = 0, Mandatory = $true)]
     [Parameter(ParameterSetName = 'Video', Position = 0, Mandatory = $true)]
     [Parameter(ParameterSetName = 'Audio', Position = 0, Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
     [string] $Url,
 
     [Parameter(ParameterSetName = 'Video', Mandatory = $true)]
@@ -86,31 +89,26 @@ $Cookies = Join-Path $WorkDir 'cookies-youtube.txt'
 # URL Validation
 # ----------------------------
 function Test-YouTubeUrl {
-    param([Parameter(Mandatory=$true)][string]$Url)
-
-    # YouTube URL patterns (youtube.com, youtu.be, m.youtube.com, etc.)
-    $patterns = @(
-        '^https?://(www\.)?youtube\.com/watch\?v=[\w-]+',
-        '^https?://(www\.)?youtube\.com/shorts/[\w-]+',
-        '^https?://(www\.)?youtube\.com/live/[\w-]+',
-        '^https?://(www\.)?youtube\.com/embed/[\w-]+',
-        '^https?://youtu\.be/[\w-]+',
-        '^https?://m\.youtube\.com/watch\?v=[\w-]+'
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Url
     )
 
-    foreach ($pattern in $patterns) {
-        if ($Url -match $pattern) {
-            return $true
-        }
-    }
+    # Combined YouTube URL pattern (youtube.com, youtu.be, m.youtube.com, etc.)
+    # Matches: /watch?v=, /shorts/, /live/, /embed/, youtu.be/
+    $pattern = '^https?://(?:(?:www\.|m\.)?youtube\.com/(?:watch\?v=|shorts/|live/|embed/)|youtu\.be/)[\w-]+'
 
-    return $false
+    return $Url -match $pattern
 }
 
 # ----------------------------
 # Requirements checks
 # ----------------------------
 function Get-RequirementsStatus {
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param()
+
     [ordered]@{
         'yt-dlp.exe'          = (Test-Path -LiteralPath $YtDlp)
         'ffmpeg.exe'          = (Test-Path -LiteralPath $Ffmpeg)
@@ -184,12 +182,20 @@ function Show-Usage {
 # Unique naming
 # ----------------------------
 function Get-NextNameFixedExt {
+    [OutputType([string])]
     param(
-        [Parameter(Mandatory=$true)][string]$Base,
-        [Parameter(Mandatory=$true)][string]$Ext,
-        [Parameter(Mandatory=$true)][ValidateSet('Full','Video','Audio')][string]$Kind
+        [Parameter(Mandatory)]
+        [string]$Base,
+
+        [Parameter(Mandatory)]
+        [string]$Ext,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Full', 'Video', 'Audio')]
+        [string]$Kind
     )
 
+    $maxIterations = 10000
     $ext = $Ext.TrimStart('.')
 
     if ($Kind -eq 'Full') {
@@ -197,12 +203,11 @@ function Get-NextNameFixedExt {
         $first = Join-Path $WorkDir ("{0}.{1}" -f $Base, $ext)
         if (-not (Test-Path -LiteralPath $first)) { return $first }
 
-        $i = 0
-        while ($true) {
+        for ($i = 0; $i -lt $maxIterations; $i++) {
             $cand = Join-Path $WorkDir ("{0}{1}.{2}" -f $Base, $i.ToString('000'), $ext)
             if (-not (Test-Path -LiteralPath $cand)) { return $cand }
-            $i++
         }
+        throw "Не удалось найти свободное имя файла после $maxIterations попыток"
     } else {
         # video.%(ext)s or video001.%(ext)s ...
         $anyFirst = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter ($Base + '.*') -ErrorAction SilentlyContinue)
@@ -210,15 +215,14 @@ function Get-NextNameFixedExt {
             return Join-Path $WorkDir ("{0}.%(ext)s" -f $Base)
         }
 
-        $i = 1
-        while ($true) {
+        for ($i = 1; $i -lt $maxIterations; $i++) {
             $prefix = "{0}{1}" -f $Base, $i.ToString('000')
             $any = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter ($prefix + '.*') -ErrorAction SilentlyContinue)
             if ($any.Count -eq 0) {
                 return Join-Path $WorkDir ("{0}.%(ext)s" -f $prefix)
             }
-            $i++
         }
+        throw "Не удалось найти свободное имя файла после $maxIterations попыток"
     }
 }
 
@@ -226,12 +230,26 @@ function Get-NextNameFixedExt {
 # Setup helpers
 # ----------------------------
 function Download-File {
+    [OutputType([void])]
     param(
-        [Parameter(Mandatory=$true)][string]$Url,
-        [Parameter(Mandatory=$true)][string]$OutFile
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Url,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$OutFile
     )
+
     Write-Info "Скачиваю: $Url"
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    }
+    catch {
+        $errorMsg = $_.Exception.Message
+        throw "Ошибка скачивания $Url : $errorMsg"
+    }
+
     $len = (Get-Item -LiteralPath $OutFile).Length
     if ($len -lt 1024) {
         throw "Скачанный файл слишком мал ($len bytes). Похоже, скачалось не то (например, HTML/ошибка)."
@@ -240,10 +258,15 @@ function Download-File {
 }
 
 function Test-YtDlpVersion {
-    param([Parameter(Mandatory=$true)][string]$YtDlpPath)
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$YtDlpPath
+    )
 
     if (-not (Test-Path -LiteralPath $YtDlpPath)) {
-        return $null
+        return
     }
 
     try {
@@ -251,14 +274,14 @@ function Test-YtDlpVersion {
         $localVersion = & $YtDlpPath --version 2>$null
         if (-not $localVersion) {
             Write-Warn "Не удалось определить локальную версию yt-dlp."
-            return $null
+            return
         }
 
         Write-Info "Локальная версия yt-dlp: $localVersion"
 
         # Получаем последнюю версию с GitHub API (быстрее чем весь HTML)
         try {
-            $response = Invoke-RestMethod -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -UseBasicParsing -TimeoutSec 5
+            $response = Invoke-RestMethod -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -TimeoutSec 5
             $latestVersion = $response.tag_name
 
             if ($latestVersion) {
@@ -379,13 +402,24 @@ function Ensure-Setup {
 # Cookie health checks
 # ----------------------------
 function Get-CookieLines {
-    param([Parameter(Mandatory=$true)][string]$Path)
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
+
     Get-Content -LiteralPath $Path -ErrorAction Stop |
         Where-Object { $_ -and ($_ -notmatch '^\s*#') }
 }
 
-function Parse-NetscapeCookieLine {
-    param([Parameter(Mandatory=$true)][string]$Line)
+function ConvertFrom-NetscapeCookieLine {
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Line
+    )
 
     # Netscape format: domain \t flag \t path \t secure \t expiry \t name \t value
     $parts = $Line -split "`t", 7
@@ -393,17 +427,22 @@ function Parse-NetscapeCookieLine {
 
     [pscustomobject]@{
         Domain = $parts[0]
-        Flag  = $parts[1]
-        Path  = $parts[2]
+        Flag   = $parts[1]
+        Path   = $parts[2]
         Secure = $parts[3]
         Expiry = $parts[4]
-        Name  = $parts[5]
-        Value = $parts[6]
+        Name   = $parts[5]
+        Value  = $parts[6]
     }
 }
 
 function Test-CookiesFileLocalHealth {
-    param([Parameter(Mandatory=$true)][string]$Path)
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
 
     $result = [ordered]@{
         Exists = $false
@@ -445,7 +484,7 @@ function Test-CookiesFileLocalHealth {
 
     $parsed = @()
     foreach ($l in $lines) {
-        $p = Parse-NetscapeCookieLine -Line $l
+        $p = ConvertFrom-NetscapeCookieLine -Line $l
         if ($null -ne $p) { $parsed += $p }
     }
 
