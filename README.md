@@ -26,13 +26,14 @@
 
 ## 🚀 Быстрый старт
 
-> **TL;DR для опытных:**
-> ```powershell
-> Unblock-File .\ytdlp.ps1
-> .\ytdlp.ps1 -Setup
-> # + добавьте cookies-youtube.txt
-> .\ytdlp.ps1 "https://youtube.com/watch?v=VIDEO_ID"
-> ```
+> 💡 **TL;DR для опытных** — скачайте скрипт, разблокируйте, запустите Setup, добавьте cookies:
+
+```powershell
+Unblock-File .\ytdlp.ps1
+.\ytdlp.ps1 -Setup
+# + добавьте cookies-youtube.txt
+.\ytdlp.ps1 "https://youtube.com/watch?v=VIDEO_ID"
+```
 
 ---
 
