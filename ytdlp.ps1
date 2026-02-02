@@ -114,7 +114,8 @@ function Test-YouTubeUrl {
         'www.youtube.com',
         'm.youtube.com',
         'music.youtube.com',
-        'www.youtube-nocookie.com',  # Privacy-enhanced embed domain
+        'youtube-nocookie.com',      # Privacy-enhanced embed domain (without www)
+        'www.youtube-nocookie.com',  # Privacy-enhanced embed domain (with www)
         'youtu.be'
     )
 
@@ -272,11 +273,12 @@ function Get-NextNameFixedExt {
         throw "Не удалось найти свободное имя файла после $maxIterations попыток"
     } else {
         # video.%(ext)s or video001.%(ext)s ...
-        # Optimization: collect all base names once into HashSet (O(n) instead of O(n²))
+        # Optimization: collect only matching base names into HashSet (O(m) where m << n)
         $existingBaseNames = [System.Collections.Generic.HashSet[string]]::new(
             [StringComparer]::OrdinalIgnoreCase
         )
-        Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+        # Filter by prefix to avoid scanning all files in large directories
+        Get-ChildItem -LiteralPath $WorkDir -File -Filter "$Base*" -ErrorAction SilentlyContinue | ForEach-Object {
             $null = $existingBaseNames.Add($_.BaseName)
         }
 
@@ -352,7 +354,9 @@ function Test-YtDlpVersion {
 
         # Получаем последнюю версию с GitHub API (быстрее чем весь HTML)
         try {
-            $response = Invoke-RestMethod -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -TimeoutSec 5
+            # User-Agent is recommended by GitHub API and helps avoid blocks in corporate networks
+            $headers = @{ 'User-Agent' = 'ytdlp-ps1/1.0' }
+            $response = Invoke-RestMethod -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -Headers $headers -TimeoutSec 5
             $latestVersion = $response.tag_name
 
             if ($latestVersion) {
@@ -563,7 +567,11 @@ function Test-CookiesFileLocalHealth {
     }
 
     # Force arrays so .Count always exists
-    $key = @($parsed | Where-Object { $keyNames -contains $_.Name })
+    # Filter by both name AND domain (.youtube.com) to avoid false positives from other Google cookies
+    $key = @($parsed | Where-Object {
+        $keyNames -contains $_.Name -and
+        ($_.Domain -eq '.youtube.com' -or $_.Domain -eq 'youtube.com' -or $_.Domain -like '*.youtube.com')
+    })
 
     if ($key.Count -gt 0) {
         $result.HasKeyCookies = $true
@@ -845,9 +853,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         Write-Host ""
-        # Find file created after download start with matching base name
+        # Find file modified after download start with matching base name
+        # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
         $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $baseName -and $_.CreationTime -ge $startTime } |
+            Where-Object { $_.BaseName -eq $baseName -and $_.LastWriteTime -ge $startTime } |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
@@ -879,9 +888,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         Write-Host ""
-        # Find file created after download start with matching base name
+        # Find file modified after download start with matching base name
+        # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
         $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.BaseName -eq $baseName -and $_.CreationTime -ge $startTime } |
+            Where-Object { $_.BaseName -eq $baseName -and $_.LastWriteTime -ge $startTime } |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
