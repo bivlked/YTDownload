@@ -50,3 +50,6 @@ $RECYCLE.BIN/
 .vscode/
 .idea/
 *.code-workspace
+
+# Serena MCP (local LSP index, do not commit)
+.serena/
