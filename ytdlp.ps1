@@ -320,8 +320,8 @@ function Save-File {
     )
 
     Write-Info "Скачиваю: $Url"
-    # Disable the progress UI: it slows Invoke-WebRequest dramatically (10-50x)
-    # on large downloads like the ffmpeg zip in PowerShell 7.
+    # Disable the progress UI for the duration of the download: rendering it adds
+    # overhead on large transfers like the ffmpeg zip and clutters scripted output.
     $oldProgress = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
     try {
