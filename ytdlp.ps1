@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 
 <#
 ytdlp.ps1 — безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7+)
@@ -307,7 +307,7 @@ function Get-NextNameFixedExt {
 # ----------------------------
 # Setup helpers
 # ----------------------------
-function Download-File {
+function Save-File {
     [OutputType([void])]
     param(
         [Parameter(Mandatory)]
@@ -320,6 +320,10 @@ function Download-File {
     )
 
     Write-Info "Скачиваю: $Url"
+    # Disable the progress UI: it slows Invoke-WebRequest dramatically (10-50x)
+    # on large downloads like the ffmpeg zip in PowerShell 7.
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
     try {
         # Note: -UseBasicParsing is default in PS7, removed for clarity
         Invoke-WebRequest -Uri $Url -OutFile $OutFile
@@ -327,6 +331,9 @@ function Download-File {
     catch {
         $errorMsg = $_.Exception.Message
         throw "Ошибка скачивания $Url : $errorMsg"
+    }
+    finally {
+        $ProgressPreference = $oldProgress
     }
 
     $len = (Get-Item -LiteralPath $OutFile).Length
@@ -350,7 +357,8 @@ function Test-YtDlpVersion {
 
     try {
         Write-Info "Проверка версии yt-dlp..."
-        $localVersion = & $YtDlpPath --version 2>$null
+        $localVersion = (& $YtDlpPath --version 2>$null | Select-Object -First 1)
+        if ($localVersion) { $localVersion = $localVersion.Trim() }
         if (-not $localVersion) {
             Write-Warn "Не удалось определить локальную версию yt-dlp."
             return
@@ -364,6 +372,7 @@ function Test-YtDlpVersion {
             $headers = @{ 'User-Agent' = 'ytdlp-ps1/1.0' }
             $response = Invoke-RestMethod -Uri 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest' -Headers $headers -TimeoutSec 5
             $latestVersion = $response.tag_name
+            if ($latestVersion) { $latestVersion = "$latestVersion".Trim() }
 
             if ($latestVersion) {
                 Write-Info "Последняя версия на GitHub: $latestVersion"
@@ -383,7 +392,7 @@ function Test-YtDlpVersion {
     }
 }
 
-function Ensure-Setup {
+function Initialize-Setup {
     param([switch]$ForceOverwrite)
 
     Write-Rule "Режим -Setup: установка stable компонентов в текущую папку"
@@ -402,15 +411,16 @@ function Ensure-Setup {
         Write-Host ""
     }
 
-    $tmp = Join-Path $WorkDir "_tmp_ytdlp_setup"
-    Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+    # Unique per-run staging dir in WorkDir (same drive = fast cross-copy,
+    # GUID suffix avoids clobbering any pre-existing folder).
+    $tmp = Join-Path $WorkDir ("_tmp_ytdlp_setup_{0}" -f [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
 
     try {
         # yt-dlp.exe
         if (-not (Test-Path -LiteralPath $YtDlp) -or $ForceOverwrite) {
             $tmpYt = Join-Path $tmp "yt-dlp.exe"
-            Download-File -Url $Links['yt-dlp (stable exe)'] -OutFile $tmpYt
+            Save-File -Url $Links['yt-dlp (stable exe)'] -OutFile $tmpYt
             Move-Item -LiteralPath $tmpYt -Destination $YtDlp -Force
             Write-Ok "Установлен yt-dlp.exe"
         } else {
@@ -423,7 +433,7 @@ function Ensure-Setup {
 
         if ($needFfmpeg -or $needFfprobe) {
             $zip = Join-Path $tmp "ffmpeg-release-essentials.zip"
-            Download-File -Url $Links['FFmpeg (release essentials zip)'] -OutFile $zip
+            Save-File -Url $Links['FFmpeg (release essentials zip)'] -OutFile $zip
 
             $unpack = Join-Path $tmp "ffmpeg_unpack"
             New-Item -ItemType Directory -Path $unpack | Out-Null
@@ -715,7 +725,7 @@ $status = Get-RequirementsStatus
 $missing = @($status.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object { $_.Key })
 
 if ($Setup) {
-    Ensure-Setup -ForceOverwrite:$Force
+    Initialize-Setup -ForceOverwrite:$Force
     exit 0
 }
 
@@ -827,8 +837,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
         Write-Warn "⚠️  MP4 режим: макс. 1080p, только H.264 видео"
         Write-Host ""
 
-        # H.264 video + AAC audio (format 140), fallback to best mp4
-        $format = 'bv*[vcodec^=avc1]+140/bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]'
+        # H.264 video (<=1080p) + AAC audio (format 140), fallback to best avc1 mp4.
+        # avc1 + height<=1080 constraints applied to EVERY branch so the result
+        # always honours the "max 1080p, H.264" device-compatibility contract.
+        $format = 'bv*[vcodec^=avc1][height<=1080]+140/bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1][height<=1080]'
         $mergeFormat = 'mp4'
     } else {
         # Default MKV mode: best quality (VP9/AV1 + Opus)
@@ -870,9 +882,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 
     $startTime = Get-Date
 
+    # 'bv' = best VIDEO-ONLY format (no audio), honouring the "без аудио" contract.
+    # 'bv*' would allow a video format that also carries audio.
     & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
-        -f 'bv*' `
+        -f 'bv' `
         -o $outTemplate `
         $Url
 
@@ -907,9 +921,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
 
     $startTime = Get-Date
 
+    # 251 = Opus ~160k (usually best YouTube audio); 'ba' = best audio-only;
+    # 'b' = best combined as last resort (some sites lack audio-only formats).
+    # Note: 'ba' and 'bestaudio' are the same alias, so the old third fallback was dead.
     & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
-        -f '251/ba/bestaudio' `
+        -f '251/ba/b' `
         -o $outTemplate `
         $Url
 
