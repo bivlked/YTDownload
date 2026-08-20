@@ -1,7 +1,7 @@
-﻿#Requires -Version 7.0
+﻿#Requires -Version 7.2
 
 <#
-ytdlp.ps1 - безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7+)
+ytdlp.ps1 - безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7.2+)
 
 Ожидает рядом (в текущем каталоге):
   - yt-dlp.exe
@@ -289,7 +289,7 @@ function Get-NextNameFixedExt {
         )
         # Filter by prefix to avoid scanning all files in large directories.
         # -Force: hidden files still occupy their names and must count as collisions.
-        Get-ChildItem -LiteralPath $WorkDir -File -Force -Filter "$Base*" -ErrorAction SilentlyContinue | ForEach-Object {
+        Get-ChildItem -LiteralPath $WorkDir -File -Force -Filter "$Base*" | ForEach-Object {
             $null = $existingBaseNames.Add($_.BaseName)
         }
 
@@ -362,7 +362,7 @@ function Test-YtDlpVersion {
 
     try {
         Write-Info "Проверка версии yt-dlp..."
-        $localVersion = (& $YtDlpPath --version 2>$null | Select-Object -First 1)
+        $localVersion = (& $YtDlpPath --ignore-config --version 2>$null | Select-Object -First 1)
         if ($localVersion) { $localVersion = $localVersion.Trim() }
         if (-not $localVersion) {
             Write-Warn "Не удалось определить локальную версию yt-dlp."
@@ -421,6 +421,15 @@ function Initialize-Setup {
         Write-Host ""
     }
 
+    # A directory occupying a component name would swallow Move-Item/Copy-Item
+    # (the binary would land INSIDE it) - refuse early with clear instructions.
+    $dirCollisions = @( @($YtDlp, $Ffmpeg, $Ffprobe) | Where-Object { Test-Path -LiteralPath $_ -PathType Container } )
+    if ($dirCollisions.Count -gt 0) {
+        foreach ($d in $dirCollisions) { Write-Err "Имя компонента занято ПАПКОЙ: $(Split-Path -Leaf $d)" }
+        Write-Info "Удалите или переименуйте эти папки и запустите -Setup снова."
+        throw "Установка прервана: имена компонентов заняты папками."
+    }
+
     # Unique per-run staging dir in WorkDir (same drive = fast cross-copy,
     # GUID suffix avoids clobbering any pre-existing folder).
     $tmp = Join-Path $WorkDir ("_tmp_ytdlp_setup_{0}" -f [guid]::NewGuid().ToString('N'))
@@ -475,7 +484,7 @@ function Initialize-Setup {
 
         Write-Host ""
         Write-Rule "🔍 Проверка версий"
-        if (Test-Path -LiteralPath $YtDlp -PathType Leaf)   { & $YtDlp --version | ForEach-Object { Write-Info ("yt-dlp: " + $_) } }
+        if (Test-Path -LiteralPath $YtDlp -PathType Leaf)   { & $YtDlp --ignore-config --version | ForEach-Object { Write-Info ("yt-dlp: " + $_) } }
         if (Test-Path -LiteralPath $Ffmpeg -PathType Leaf)  { & $Ffmpeg -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffmpeg: " + $_) } }
         if (Test-Path -LiteralPath $Ffprobe -PathType Leaf) { & $Ffprobe -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffprobe: " + $_) } }
 
@@ -619,10 +628,10 @@ function Test-CookiesFileLocalHealth {
         # Expiry can be "0" for session cookies in some exports; treat 0 as "unknown/session".
         # TryParse instead of a cast: an absurdly long digit string would overflow [int64]
         # and terminate the script under ErrorActionPreference = 'Stop'.
-        $expirable = @($key | Where-Object { $v = 0L; [int64]::TryParse($_.Expiry, [ref]$v) -and $v -gt 0 })
+        $expirable = @($key | ForEach-Object { $v = 0L; if ([int64]::TryParse($_.Expiry, [ref]$v) -and $v -gt 0) { $v } })
 
         if ($expirable.Count -gt 0) {
-            $expired = @($expirable | Where-Object { [int64]$_.Expiry -lt $now })
+            $expired = @($expirable | Where-Object { $_ -lt $now })
             if ($expired.Count -eq $expirable.Count) {
                 $result.KeyCookiesExpired = $true
                 $result.Notes += "Похоже, все ключевые cookies уже истекли по expiry (UTC epoch)."
@@ -677,7 +686,8 @@ function Test-CookiesOnlineForUrl {
     Write-Info "Проверка выполняется без загрузки медиа (skip-download)."
     Write-Host ""
 
-    # --ignore-config: a personal yt-dlp config must not silently override the wrapper's flags
+    # --ignore-config: a personal yt-dlp config must not silently ADD options the
+    # wrapper does not set (e.g. --simulate, --exec); CLI flags themselves already win
     $probeArgs = @(
         '--ignore-config',
         '--ffmpeg-location', $WorkDir,
@@ -717,9 +727,10 @@ function Test-CookiesOnlineForUrl {
         if ($isBad) {
             Write-Err "Проверка cookies НЕ пройдена."
         } else {
-            # Nonzero exit without a cookie-related pattern: do not blame cookies
+            # Nonzero exit without a cookie-related pattern: do not assert a single cause
             Write-Err "Проверка не пройдена: yt-dlp не смог обработать URL (код: $exit)."
-            Write-Warn "Причина может быть не в cookies: видео удалено, приватное или недоступно."
+            Write-Warn "Возможные причины: видео удалено/приватное/недоступно, устаревший yt-dlp, либо всё же cookies."
+            Write-Info "Первый шаг - обновить yt-dlp: .\ytdlp.ps1 -Setup -Force"
         }
         if ($output) {
             $lines = @(($output -split "`r?`n") | Where-Object { $_ } | Select-Object -First 20)
@@ -882,14 +893,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
         $Url
 
     $exitCode = $LASTEXITCODE
-    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $outFile -PathType Leaf)) {
+    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $outFile -PathType Leaf) -and (Get-Item -LiteralPath $outFile).Length -gt 0) {
         Write-Host ""
         Write-Ok "Скачивание завершено успешно: $(Split-Path -Leaf $outFile)"
     } elseif ($exitCode -eq 0) {
-        # Exit 0 without the promised file must not be reported as success
+        # Exit 0 without the promised (non-empty) file must not be reported as success
         Write-Host ""
-        Write-Err "yt-dlp завершился без ошибки, но ожидаемый файл не появился: $(Split-Path -Leaf $outFile)"
-        $exitCode = 1
+        Write-Err "yt-dlp завершился без ошибки, но ожидаемый файл не появился или пуст: $(Split-Path -Leaf $outFile)"
+        Write-Info "Частая причина - устаревший yt-dlp. Обновление: .\ytdlp.ps1 -Setup -Force"
+        $exitCode = 6
     } else {
         Write-Host ""
         Write-Err "Скачивание завершилось с ошибкой (код: $exitCode)"
@@ -910,8 +922,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 
     # 'bv' = best VIDEO-ONLY format (no audio), honouring the "без аудио" contract.
     # 'bv*' would allow a video format that also carries audio.
+    # --no-mtime: keep download-time mtime so result detection below (LastWriteTime)
+    # stays reliable even with yt-dlp versions that default to upload-date mtime.
     & $YtDlp --ignore-config --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
+        --no-mtime `
         -f 'bv' `
         -o $outTemplate `
         $Url
@@ -930,7 +945,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
-            Write-Ok "Скачивание завершено успешно"
+            # Exit 0 but no matching new file found - do not paint it green
+            Write-Warn "yt-dlp завершился без ошибки, но новый файл с ожидаемым именем не найден - проверьте папку."
         }
     } else {
         Write-Host ""
@@ -953,8 +969,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     # 251 = Opus ~160k (usually best YouTube audio); 'ba' = best audio-only;
     # 'b' = best combined as last resort (some sites lack audio-only formats).
     # Note: 'ba' and 'bestaudio' are the same alias, so the old third fallback was dead.
+    # --no-mtime: keep download-time mtime so result detection below (LastWriteTime)
+    # stays reliable even with yt-dlp versions that default to upload-date mtime.
     & $YtDlp --ignore-config --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
+        --no-mtime `
         -f '251/ba/b' `
         -o $outTemplate `
         $Url
@@ -973,7 +992,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
-            Write-Ok "Скачивание завершено успешно"
+            # Exit 0 but no matching new file found - do not paint it green
+            Write-Warn "yt-dlp завершился без ошибки, но новый файл с ожидаемым именем не найден - проверьте папку."
         }
     } else {
         Write-Host ""
