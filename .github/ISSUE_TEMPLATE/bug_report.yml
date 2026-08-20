@@ -1,5 +1,6 @@
 name: 🐛 Сообщение об ошибке / Bug report
-description: Скрипт работает не так, как описано / Something works not as documented
+description: Скрипт работает не так, как описано / Something doesn't work as documented
+title: "[Bug]: "
 labels: [bug]
 body:
   - type: markdown

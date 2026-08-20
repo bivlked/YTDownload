@@ -2,7 +2,7 @@
 
 # 📥 YTDownload
 
-**Download YouTube videos in maximum quality with a single PowerShell script**
+**Download YouTube videos in the highest available quality with a single PowerShell script**
 
 [![PowerShell 7.2+](https://img.shields.io/badge/PowerShell-7.2%2B-5391FE?logo=powershell&logoColor=white)](https://github.com/PowerShell/PowerShell)
 [![Release](https://img.shields.io/github/v/release/bivlked/YTDownload?color=2ea44f)](https://github.com/bivlked/YTDownload/releases/latest)
@@ -37,7 +37,9 @@ A single script, `ytdlp.ps1`, downloads the best available video and audio strea
 - [Technical Details](#%EF%B8%8F-technical-details)
 - [Security](#-security)
 - [Contributing](#-contributing)
+- [Changelog](#-changelog)
 - [License](#-license)
+- [Disclaimer](#%EF%B8%8F-disclaimer)
 
 ## ✨ Features
 
@@ -54,13 +56,13 @@ A single script, `ytdlp.ps1`, downloads the best available video and audio strea
 
 - **Windows 10/11**
 - **PowerShell 7.2+** ([download](https://github.com/PowerShell/PowerShell/releases/latest))
-- **cookies-youtube.txt** - a cookie file for authorization (see [Step 2](#-step-2-set-up-cookies))
+- **cookies-youtube.txt** - a cookie file for authentication (see [Step 2](#-step-2-set-up-cookies))
 
 The yt-dlp, ffmpeg, and ffprobe components are downloaded automatically by the script.
 
 ## 🚀 Quick Start
 
-**TL;DR for the experienced:** download the script, unblock it, run Setup, add cookies:
+**TL;DR for experienced users:** download the script, unblock it, run Setup, add cookies:
 
 ```powershell
 Unblock-File .\ytdlp.ps1
@@ -168,7 +170,7 @@ flowchart LR
     M -->|"-Audio"| A["audio.*<br/>audio only"]
 ```
 
-Before every download the script validates the URL, checks cookie health, and only then runs yt-dlp with vetted flags. After the download it verifies the result honestly: exit code 0 without an actual output file is not reported as success.
+Before every download the script checks cookie health, validates the URL, and only then runs yt-dlp with vetted flags. After the download it verifies the result honestly: exit code 0 without an actual output file is not reported as success.
 
 ## 📖 Modes
 
@@ -183,7 +185,7 @@ Before every download the script validates the URL, checks cookie health, and on
 
 ---
 
-#### 📦 Setup mode: `-Setup`
+### 📦 Setup mode: `-Setup`
 
 Downloads and installs all required components into the current folder.
 
@@ -200,10 +202,10 @@ Downloads and installs all required components into the current folder.
 - Downloads the latest stable yt-dlp, ffmpeg, and ffprobe
 - Checks the yt-dlp version against the GitHub API
 - Prints the versions of installed components
-- Refuses to run if a component name is occupied by a directory (protection against a silently broken install)
+- Refuses to run if a component name is taken by a directory (protection against a silently broken install)
 - Reminds you to add cookies
 
-#### 📥 Full video mode (default)
+### 📥 Full video mode (default)
 
 Downloads the best video and audio and merges them into a single MKV file with no re-encoding.
 
@@ -215,7 +217,7 @@ Downloads the best video and audio and merges them into a single MKV file with n
 
 **File names:** `downloaded.mkv`, then `downloaded000.mkv`, `downloaded001.mkv`, ...
 
-#### 📼 MP4 mode: `-Mp4`
+### 📼 MP4 mode: `-Mp4`
 
 For devices that do not support MKV/VP9/Opus (some TVs, older phones).
 
@@ -223,7 +225,7 @@ For devices that do not support MKV/VP9/Opus (some TVs, older phones).
 
 **File names:** same as full mode, but `.mp4`.
 
-#### 🎬 Video-only mode: `-Video`
+### 🎬 Video-only mode: `-Video`
 
 **Format selector:** `bv`
 
@@ -232,7 +234,7 @@ For devices that do not support MKV/VP9/Opus (some TVs, older phones).
 
 **File names:** `video.webm`, `video.mp4`, ... then `video001.*`, `video002.*`, ...
 
-#### 🎵 Audio-only mode: `-Audio`
+### 🎵 Audio-only mode: `-Audio`
 
 **Format selector:** `251/ba/b`
 
@@ -257,6 +259,8 @@ The script returns meaningful exit codes - handy for automation:
 | `10` | Unknown run mode (defensive code, unreachable in normal use) |
 | other | Nonzero exit codes from yt-dlp itself are passed through as-is |
 
+> Code `6` can only occur in default and `-Mp4` modes (where the output name is known in advance). In `-Video`/`-Audio`, a missing file produces a warning with exit code `0`.
+
 ## 🔗 Supported URLs
 
 - ✅ `https://www.youtube.com/watch?v=VIDEO_ID`
@@ -277,8 +281,8 @@ The script returns meaningful exit codes - handy for automation:
 
 1. **Components**: `yt-dlp.exe`, `ffmpeg.exe`, and `cookies-youtube.txt` are required; `ffprobe.exe` is optional (a warning instead of a hard stop). A directory named like a component does not count as an installed component.
 2. **Local cookie health**: Netscape format, presence of cookie rows, key YouTube cookies (SID, SAPISID, HSID, etc.), expiry.
-3. **Online cookie check** (conditional): runs only if the local check found potential problems. Fast, no media download (`--skip-download`). If the error looks cookie-related, the script shows a cookie-refresh guide; otherwise it honestly lists other possible causes (video deleted/private, outdated yt-dlp).
-4. **URL validation**: host and path checks; on failure, examples of valid formats are printed.
+3. **URL validation**: host and path checks; on failure, examples of valid formats are printed.
+4. **Online cookie check** (conditional): runs only if the local check found potential problems. Fast, no media download (`--skip-download`). If the error looks cookie-related, the script shows a cookie-refresh guide; otherwise it honestly lists other possible causes (video deleted/private, outdated yt-dlp).
 
 ## 🔄 Updating Components
 
@@ -300,7 +304,7 @@ YouTube's best quality uses the VP9/AV1 + Opus codecs, and the MP4 container doe
 
 ### Why are cookies required?
 
-YouTube shows a "Sign in to confirm you're not a bot" check for anonymous requests. Cookies from a signed-in session let yt-dlp download without that block. The file stays on your disk and is sent nowhere except YouTube itself.
+YouTube shows a "Sign in to confirm you're not a bot" check for anonymous requests. Cookies from a signed-in session let yt-dlp download without that block. The file stays on your disk and is never sent anywhere except to YouTube.
 
 ### Can I download a whole playlist?
 
@@ -312,7 +316,7 @@ No. Every yt-dlp invocation runs with `--ignore-config`: the script's behavior i
 
 ### What modification time (mtime) do downloaded files get?
 
-The moment of download (`--no-mtime` is passed), not the video's upload date. This way files sort correctly by recency in Explorer.
+In `-Video`/`-Audio` modes - the moment of download (`--no-mtime` is passed): result-name detection relies on it. In default and `-Mp4` modes the time depends on the yt-dlp version: older versions set the video's upload date, recent ones set the download moment.
 
 ## 🛠️ Troubleshooting
 
@@ -368,7 +372,7 @@ Set-ExecutionPolicy Bypass -Scope Process
 </details>
 
 <details>
-<summary><b>⚡ Old PowerShell version</b> - odd errors, "cmdlet name not recognized"</summary>
+<summary><b>⚡ Old PowerShell version</b> - odd errors, "is not recognized as the name of a cmdlet"</summary>
 
 **Cause:** Windows PowerShell 5.x is being used instead of PowerShell 7.2+.
 
@@ -454,7 +458,7 @@ Reference: [yt-dlp format selection docs](https://github.com/yt-dlp/yt-dlp#forma
 |------|-----|
 | `--ignore-config` | Isolation from personal yt-dlp configs: predictable behavior |
 | `--no-playlist` | Never download a playlist via a link to one of its videos |
-| `--no-mtime` | File time = download moment, not the video's upload date |
+| `--no-mtime` | `-Video`/`-Audio` modes: file time = download moment, not the upload date |
 | `--merge-output-format` | Output container (mkv/mp4) without re-encoding |
 | `--ffmpeg-location` | Uses the ffmpeg from the script's folder, not a system one |
 
@@ -471,9 +475,11 @@ The script is designed with safety in mind:
 - ✅ Uses `Set-StrictMode -Version Latest`
 - ✅ Reports honestly: "success" without an actual output file is impossible
 
+Found a vulnerability? Please report it privately - see [SECURITY.md](SECURITY.md).
+
 ## 🤝 Contributing
 
-Found a bug or want to suggest an improvement? Open an [Issue](https://github.com/bivlked/YTDownload/issues) or a Pull Request! When reporting a bug, please include: your PowerShell version (`$PSVersionTable.PSVersion`), yt-dlp version (`.\yt-dlp.exe --version`), and the full error text.
+Found a bug or want to suggest an improvement? Open an [Issue](https://github.com/bivlked/YTDownload/issues/new/choose) or a Pull Request. What to include in a bug report and how to shape a PR - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📋 Changelog
 

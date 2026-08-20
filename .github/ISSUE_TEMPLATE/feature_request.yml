@@ -1,0 +1,27 @@
+name: 💡 Предложение улучшения / Feature request
+description: Идея новой возможности или улучшения / An idea for a new capability or improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает / What problem does it solve
+      description: Опишите ситуацию, в которой текущего поведения не хватает
+      placeholder: Хочу скачивать субтитры вместе с видео, сейчас приходится...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Как вы видите решение / Proposed solution
+      description: Каким должно быть поведение (команда, флаг, вывод)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы / Alternatives
+      description: Чем обходитесь сейчас, какие варианты рассматривали
+    validations:
+      required: false

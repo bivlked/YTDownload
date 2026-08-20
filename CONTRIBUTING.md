@@ -24,7 +24,7 @@
 
 1. Форкните репозиторий и создайте ветку от `main`
 2. Один PR - одно логическое изменение
-3. Скрипт должен проходить [PSScriptAnalyzer](https://github.com/PowerShell/PSScriptAnalyzer) без новых предупреждений (существующие осознанные исключения: `PSAvoidUsingWriteHost` - цветной UI, `PSReviewUnusedParameter` для `Video`/`Audio` - ложное срабатывание ParameterSetName)
+3. Скрипт должен проходить [PSScriptAnalyzer](https://github.com/PowerShell/PSScriptAnalyzer) без новых предупреждений (существующие осознанные исключения: `PSAvoidUsingWriteHost` - цветной UI, `PSReviewUnusedParameter` для `Video`/`Audio` - ложное срабатывание ParameterSetName, `PSUseSingularNouns` для `Show-AboutAndLinks`/`Get-CookieLines` - устоявшиеся имена)
 4. Проверьте изменения реальным запуском: `-Setup` в чистой папке и хотя бы один режим скачивания
 5. Обновите README (обе языковые версии) и CHANGELOG.md, если меняется поведение
 
