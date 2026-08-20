@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💡 Предложение улучшения / Feature request
+    url: https://github.com/bivlked/YTDownload/issues/new
+    about: Опишите задачу, которую решает предложение, обычным Issue

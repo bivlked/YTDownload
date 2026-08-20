@@ -1,0 +1,50 @@
+name: 🐛 Сообщение об ошибке / Bug report
+description: Скрипт работает не так, как описано / Something works not as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение! Два самых частых случая решаются без Issue:
+        - **Ошибка скачивания / 403 / только 1080p** -> обновите yt-dlp: `.\ytdlp.ps1 -Setup -Force`
+        - **"Sign in to confirm you're not a bot"** -> переэкспортируйте cookies (README, Шаг 2)
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло / What happened
+      description: Что вы ожидали и что получили вместо этого
+      placeholder: Запустил скачивание, ожидал 4K, получил файл 1080p...
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Команда запуска / Command
+      description: Точная команда; URL можно заменить похожим публичным роликом
+      placeholder: .\ytdlp.ps1 "https://www.youtube.com/watch?v=..."
+    validations:
+      required: true
+  - type: input
+    id: ps-version
+    attributes:
+      label: Версия PowerShell / PowerShell version
+      description: Вывод `$PSVersionTable.PSVersion` (запуск через pwsh.exe)
+      placeholder: "7.5.2"
+    validations:
+      required: true
+  - type: input
+    id: ytdlp-version
+    attributes:
+      label: Версия yt-dlp / yt-dlp version
+      description: Вывод `.\yt-dlp.exe --version`
+      placeholder: "2026.08.19"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Полный вывод / Full output
+      description: Весь вывод скрипта целиком, не только последняя строка
+      render: text
+    validations:
+      required: true
