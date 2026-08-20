@@ -2,7 +2,7 @@
 
 **Простой и безопасный PowerShell скрипт для скачивания видео с YouTube в максимальном качестве**
 
-[![PowerShell](https://img.shields.io/badge/PowerShell-7%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+[![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
 
@@ -10,7 +10,7 @@
 
 - ✅ **Максимальное качество** - скачивает лучшие доступные видео и аудио потоки без перекодирования
 - 🔒 **Безопасность** - работает только в текущей папке, не изменяет системные файлы
-- 🎯 **Простота** - один скрипт, никаких системных зависимостей кроме PowerShell 7+
+- 🎯 **Простота** - один скрипт, никаких системных зависимостей кроме PowerShell 7.2+
 - 🚀 **Автоматическая установка** - скачивает все необходимые компоненты одной командой
 - 📦 **Портативность** - все файлы в одной папке, легко переносить
 - 🎨 **Красивый вывод** - цветные информативные сообщения с эмодзи
@@ -298,7 +298,7 @@ Set-ExecutionPolicy Bypass -Scope Process
 
 **Причина:** Используется Windows PowerShell 5.x вместо PowerShell 7+.
 
-**Проверка:** `$PSVersionTable.PSVersion` - должно быть 7.0+
+**Проверка:** `$PSVersionTable.PSVersion` - должно быть 7.2+
 
 **Решение:**
 1. [Скачайте PowerShell 7](https://github.com/PowerShell/PowerShell/releases/latest)
