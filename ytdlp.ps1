@@ -1,7 +1,7 @@
-﻿#Requires -Version 7.0
+﻿#Requires -Version 7.2
 
 <#
-ytdlp.ps1 — безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7+)
+ytdlp.ps1 - безопасный помощник для yt-dlp + ffmpeg в текущей папке (PowerShell 7.2+)
 
 Ожидает рядом (в текущем каталоге):
   - yt-dlp.exe
@@ -47,6 +47,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Keep native exit codes observable: if the caller's session enables
+# PSNativeCommandUseErrorActionPreference, a nonzero yt-dlp exit would become
+# a terminating error before our $LASTEXITCODE handling runs.
+$PSNativeCommandUseErrorActionPreference = $false
 
 # ----------------------------
 # Console UI helpers
@@ -157,7 +161,7 @@ function Test-YouTubeUrl {
         # Split query into key=value pairs and look for 'v' (case-insensitive)
         foreach ($pair in $query -split '&') {
             $kv = $pair -split '=', 2
-            if ($kv.Count -ge 1 -and $kv[0] -ieq 'v' -and $kv.Count -eq 2 -and $kv[1] -match '^[\w-]+') {
+            if ($kv.Count -eq 2 -and $kv[0] -ieq 'v' -and $kv[1] -match '^[\w-]+') {
                 return $true
             }
         }
@@ -175,25 +179,25 @@ function Get-RequirementsStatus {
     param()
 
     [ordered]@{
-        'yt-dlp.exe'          = (Test-Path -LiteralPath $YtDlp)
-        'ffmpeg.exe'          = (Test-Path -LiteralPath $Ffmpeg)
-        'ffprobe.exe'         = (Test-Path -LiteralPath $Ffprobe)
-        'cookies-youtube.txt' = (Test-Path -LiteralPath $Cookies)
+        'yt-dlp.exe'          = (Test-Path -LiteralPath $YtDlp -PathType Leaf)
+        'ffmpeg.exe'          = (Test-Path -LiteralPath $Ffmpeg -PathType Leaf)
+        'ffprobe.exe'         = (Test-Path -LiteralPath $Ffprobe -PathType Leaf)
+        'cookies-youtube.txt' = (Test-Path -LiteralPath $Cookies -PathType Leaf)
     }
 }
 
 function Show-AboutAndLinks {
-    Write-Rule "📥 ytdlp.ps1 — загрузка YouTube в максимальном качестве (без перекодирования)"
+    Write-Rule "📥 ytdlp.ps1 - загрузка YouTube в максимальном качестве (без перекодирования)"
     Write-Info "Текущая папка: $WorkDir"
     Write-Info "yt-dlp загружает потоки, ffmpeg объединяет (mux) видео+аудио без re-encode."
     Write-Info "Для YouTube часто требуются cookies (иначе будет проверка 'not a bot')."
     Write-Host ""
 
     Write-Rule "📦 Ожидаемые файлы рядом (ровно 4)"
-    Write-Host "  1️⃣  yt-dlp.exe          " -ForegroundColor White -NoNewline; Write-Host "— загрузка видео/аудио потоков" -ForegroundColor Gray
-    Write-Host "  2️⃣  ffmpeg.exe          " -ForegroundColor White -NoNewline; Write-Host "— склейка (mux) видео+аудио, контейнерные операции" -ForegroundColor Gray
-    Write-Host "  3️⃣  ffprobe.exe         " -ForegroundColor White -NoNewline; Write-Host "— анализ медиапотоков" -ForegroundColor Gray
-    Write-Host "  4️⃣  cookies-youtube.txt " -ForegroundColor White -NoNewline; Write-Host "— авторизация/антибот для YouTube (Netscape cookie file)" -ForegroundColor Gray
+    Write-Host "  1️⃣  yt-dlp.exe          " -ForegroundColor White -NoNewline; Write-Host "- загрузка видео/аудио потоков" -ForegroundColor Gray
+    Write-Host "  2️⃣  ffmpeg.exe          " -ForegroundColor White -NoNewline; Write-Host "- склейка (mux) видео+аудио, контейнерные операции" -ForegroundColor Gray
+    Write-Host "  3️⃣  ffprobe.exe         " -ForegroundColor White -NoNewline; Write-Host "- анализ медиапотоков" -ForegroundColor Gray
+    Write-Host "  4️⃣  cookies-youtube.txt " -ForegroundColor White -NoNewline; Write-Host "- авторизация/антибот для YouTube (Netscape cookie file)" -ForegroundColor Gray
     Write-Host ""
 
     Write-Rule "🔗 Ссылки на скачивание (stable)"
@@ -283,8 +287,9 @@ function Get-NextNameFixedExt {
         $existingBaseNames = [System.Collections.Generic.HashSet[string]]::new(
             [StringComparer]::OrdinalIgnoreCase
         )
-        # Filter by prefix to avoid scanning all files in large directories
-        Get-ChildItem -LiteralPath $WorkDir -File -Filter "$Base*" -ErrorAction SilentlyContinue | ForEach-Object {
+        # Filter by prefix to avoid scanning all files in large directories.
+        # -Force: hidden files still occupy their names and must count as collisions.
+        Get-ChildItem -LiteralPath $WorkDir -File -Force -Filter "$Base*" | ForEach-Object {
             $null = $existingBaseNames.Add($_.BaseName)
         }
 
@@ -351,16 +356,21 @@ function Test-YtDlpVersion {
         [string]$YtDlpPath
     )
 
-    if (-not (Test-Path -LiteralPath $YtDlpPath)) {
+    if (-not (Test-Path -LiteralPath $YtDlpPath -PathType Leaf)) {
         return
     }
 
     try {
         Write-Info "Проверка версии yt-dlp..."
-        $localVersion = (& $YtDlpPath --version 2>$null | Select-Object -First 1)
+        $localVersion = (& $YtDlpPath --ignore-config --version 2>$null | Select-Object -First 1)
         if ($localVersion) { $localVersion = $localVersion.Trim() }
         if (-not $localVersion) {
             Write-Warn "Не удалось определить локальную версию yt-dlp."
+            return
+        }
+        # yt-dlp versions look like 2026.08.19; anything else means the exe printed a diagnostic
+        if ($localVersion -notmatch '^\d{4}\.\d{2}\.\d{2}') {
+            Write-Warn "Неожиданный вывод yt-dlp --version: $localVersion"
             return
         }
 
@@ -400,15 +410,24 @@ function Initialize-Setup {
     Write-Host ""
 
     $existing = @()
-    if (Test-Path -LiteralPath $YtDlp)   { $existing += 'yt-dlp.exe' }
-    if (Test-Path -LiteralPath $Ffmpeg)  { $existing += 'ffmpeg.exe' }
-    if (Test-Path -LiteralPath $Ffprobe) { $existing += 'ffprobe.exe' }
+    if (Test-Path -LiteralPath $YtDlp -PathType Leaf)   { $existing += 'yt-dlp.exe' }
+    if (Test-Path -LiteralPath $Ffmpeg -PathType Leaf)  { $existing += 'ffmpeg.exe' }
+    if (Test-Path -LiteralPath $Ffprobe -PathType Leaf) { $existing += 'ffprobe.exe' }
 
     if ($existing.Count -gt 0 -and -not $ForceOverwrite) {
         Write-Warn "Уже существуют файлы: $($existing -join ', ')"
         Write-Warn "По умолчанию я НЕ перезаписываю их (безопасный режим)."
         Write-Info "Для принудительной перезаписи/обновления: .\ytdlp.ps1 -Setup -Force"
         Write-Host ""
+    }
+
+    # A directory occupying a component name would swallow Move-Item/Copy-Item
+    # (the binary would land INSIDE it) - refuse early with clear instructions.
+    $dirCollisions = @( @($YtDlp, $Ffmpeg, $Ffprobe) | Where-Object { Test-Path -LiteralPath $_ -PathType Container } )
+    if ($dirCollisions.Count -gt 0) {
+        foreach ($d in $dirCollisions) { Write-Err "Имя компонента занято ПАПКОЙ: $(Split-Path -Leaf $d)" }
+        Write-Info "Удалите или переименуйте эти папки и запустите -Setup снова."
+        throw "Установка прервана: имена компонентов заняты папками."
     }
 
     # Unique per-run staging dir in WorkDir (same drive = fast cross-copy,
@@ -418,18 +437,18 @@ function Initialize-Setup {
 
     try {
         # yt-dlp.exe
-        if (-not (Test-Path -LiteralPath $YtDlp) -or $ForceOverwrite) {
+        if (-not (Test-Path -LiteralPath $YtDlp -PathType Leaf) -or $ForceOverwrite) {
             $tmpYt = Join-Path $tmp "yt-dlp.exe"
             Save-File -Url $Links['yt-dlp (stable exe)'] -OutFile $tmpYt
             Move-Item -LiteralPath $tmpYt -Destination $YtDlp -Force
             Write-Ok "Установлен yt-dlp.exe"
         } else {
-            Write-Ok "yt-dlp.exe уже есть — пропускаю"
+            Write-Ok "yt-dlp.exe уже есть - пропускаю"
         }
 
         # ffmpeg/ffprobe
-        $needFfmpeg  = (-not (Test-Path -LiteralPath $Ffmpeg))  -or $ForceOverwrite
-        $needFfprobe = (-not (Test-Path -LiteralPath $Ffprobe)) -or $ForceOverwrite
+        $needFfmpeg  = (-not (Test-Path -LiteralPath $Ffmpeg -PathType Leaf))  -or $ForceOverwrite
+        $needFfprobe = (-not (Test-Path -LiteralPath $Ffprobe -PathType Leaf)) -or $ForceOverwrite
 
         if ($needFfmpeg -or $needFfprobe) {
             $zip = Join-Path $tmp "ffmpeg-release-essentials.zip"
@@ -450,28 +469,28 @@ function Initialize-Setup {
                 Copy-Item -LiteralPath $foundFfmpeg.FullName -Destination $Ffmpeg -Force
                 Write-Ok "Установлен ffmpeg.exe"
             } else {
-                Write-Ok "ffmpeg.exe уже есть — пропускаю"
+                Write-Ok "ffmpeg.exe уже есть - пропускаю"
             }
 
             if ($needFfprobe) {
                 Copy-Item -LiteralPath $foundFfprobe.FullName -Destination $Ffprobe -Force
                 Write-Ok "Установлен ffprobe.exe"
             } else {
-                Write-Ok "ffprobe.exe уже есть — пропускаю"
+                Write-Ok "ffprobe.exe уже есть - пропускаю"
             }
         } else {
-            Write-Ok "ffmpeg.exe и ffprobe.exe уже есть — пропускаю"
+            Write-Ok "ffmpeg.exe и ffprobe.exe уже есть - пропускаю"
         }
 
         Write-Host ""
         Write-Rule "🔍 Проверка версий"
-        if (Test-Path -LiteralPath $YtDlp)   { & $YtDlp --version | ForEach-Object { Write-Info ("yt-dlp: " + $_) } }
-        if (Test-Path -LiteralPath $Ffmpeg)  { & $Ffmpeg -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffmpeg: " + $_) } }
-        if (Test-Path -LiteralPath $Ffprobe) { & $Ffprobe -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffprobe: " + $_) } }
+        if (Test-Path -LiteralPath $YtDlp -PathType Leaf)   { & $YtDlp --ignore-config --version | ForEach-Object { Write-Info ("yt-dlp: " + $_) } }
+        if (Test-Path -LiteralPath $Ffmpeg -PathType Leaf)  { & $Ffmpeg -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffmpeg: " + $_) } }
+        if (Test-Path -LiteralPath $Ffprobe -PathType Leaf) { & $Ffprobe -version | Select-Object -First 1 | ForEach-Object { Write-Info ("ffprobe: " + $_) } }
 
         Write-Host ""
         # Проверка актуальности yt-dlp
-        if (Test-Path -LiteralPath $YtDlp) {
+        if (Test-Path -LiteralPath $YtDlp -PathType Leaf) {
             Test-YtDlpVersion -YtDlpPath $YtDlp
         }
 
@@ -558,7 +577,7 @@ function Test-CookiesFileLocalHealth {
         Notes = @()
     }
 
-    if (-not (Test-Path -LiteralPath $Path)) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         $result.Notes += "Файл cookies-youtube.txt не найден."
         return [pscustomobject]$result
     }
@@ -575,8 +594,8 @@ function Test-CookiesFileLocalHealth {
     }
 
     $lines = @(Get-CookieLines -Path $Path)
-    if ($lines.Count -gt 0) { 
-        $result.HasAnyCookieLines = $true 
+    if ($lines.Count -gt 0) {
+        $result.HasAnyCookieLines = $true
     } else {
         $result.Notes += "В cookie-файле нет ни одной строки cookies (кроме комментариев)."
         return [pscustomobject]$result
@@ -606,11 +625,13 @@ function Test-CookiesFileLocalHealth {
     if ($key.Count -gt 0) {
         $result.HasKeyCookies = $true
 
-        # Expiry can be "0" for session cookies in some exports; treat 0 as "unknown/session"
-        $expirable = @($key | Where-Object { $_.Expiry -match '^\d+$' -and [int64]$_.Expiry -gt 0 })
+        # Expiry can be "0" for session cookies in some exports; treat 0 as "unknown/session".
+        # TryParse instead of a cast: an absurdly long digit string would overflow [int64]
+        # and terminate the script under ErrorActionPreference = 'Stop'.
+        $expirable = @($key | ForEach-Object { $v = 0L; if ([int64]::TryParse($_.Expiry, [ref]$v) -and $v -gt 0) { $v } })
 
         if ($expirable.Count -gt 0) {
-            $expired = @($expirable | Where-Object { [int64]$_.Expiry -lt $now })
+            $expired = @($expirable | Where-Object { $_ -lt $now })
             if ($expired.Count -eq $expirable.Count) {
                 $result.KeyCookiesExpired = $true
                 $result.Notes += "Похоже, все ключевые cookies уже истекли по expiry (UTC epoch)."
@@ -642,7 +663,7 @@ function Show-CookieHealthSummary {
 }
 
 function Show-CookieFixGuidance {
-    Write-Rule "Cookies выглядят нерабочими — что делать"
+    Write-Rule "Cookies выглядят нерабочими - что делать"
     Write-Warn "YouTube отклоняет авторизацию: cookies могли быть ротированы/инвалидированы."
     Write-Info "Рекомендуемый надёжный способ:"
     Write-Info "  1) Откройте InPrivate/Incognito окно браузера."
@@ -665,7 +686,10 @@ function Test-CookiesOnlineForUrl {
     Write-Info "Проверка выполняется без загрузки медиа (skip-download)."
     Write-Host ""
 
+    # --ignore-config: a personal yt-dlp config must not silently ADD options the
+    # wrapper does not set (e.g. --simulate, --exec); CLI flags themselves already win
     $probeArgs = @(
+        '--ignore-config',
         '--ffmpeg-location', $WorkDir,
         '--cookies', $Cookies,
         '--no-playlist',
@@ -700,18 +724,25 @@ function Test-CookiesOnlineForUrl {
     }
 
     if ($exit -ne 0 -or $isBad) {
-        Write-Err "Проверка cookies НЕ пройдена."
+        if ($isBad) {
+            Write-Err "Проверка cookies НЕ пройдена."
+        } else {
+            # Nonzero exit without a cookie-related pattern: do not assert a single cause
+            Write-Err "Проверка не пройдена: yt-dlp не смог обработать URL (код: $exit)."
+            Write-Warn "Возможные причины: видео удалено/приватное/недоступно, устаревший yt-dlp, либо всё же cookies."
+            Write-Info "Первый шаг - обновить yt-dlp: .\ytdlp.ps1 -Setup -Force"
+        }
         if ($output) {
             $lines = @(($output -split "`r?`n") | Where-Object { $_ } | Select-Object -First 20)
             Write-Warn "Фрагмент вывода yt-dlp (первые строки):"
             foreach ($l in $lines) { Write-Host ("    " + $l) -ForegroundColor DarkYellow }
             Write-Host ""
         }
-        Show-CookieFixGuidance
+        if ($isBad) { Show-CookieFixGuidance }
         return $false
     }
 
-    Write-Ok "Проверка cookies пройдена — можно скачивать."
+    Write-Ok "Проверка cookies пройдена - можно скачивать."
     Write-Host ""
     return $true
 }
@@ -732,11 +763,11 @@ if ($Setup) {
 if ($PSCmdlet.ParameterSetName -eq 'Help') {
     Write-Rule "Статус компонентов в текущей папке"
     foreach ($k in $status.Keys) {
-        if ($status[$k]) { Write-Ok "$k — найден" } else { Write-Warn "$k — отсутствует" }
+        if ($status[$k]) { Write-Ok "$k - найден" } else { Write-Warn "$k - отсутствует" }
     }
     Write-Host ""
 
-    if (Test-Path -LiteralPath $Cookies) {
+    if (Test-Path -LiteralPath $Cookies -PathType Leaf) {
         $health = Test-CookiesFileLocalHealth -Path $Cookies
         Show-CookieHealthSummary -Health $health
         Write-Info "Важно: даже корректный cookie-файл может быть ротирован YouTube. Реальная онлайн-проверка выполняется при скачивании по URL."
@@ -756,19 +787,19 @@ if ($PSCmdlet.ParameterSetName -eq 'Help') {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $YtDlp) -or -not (Test-Path -LiteralPath $Ffmpeg)) {
+if (-not (Test-Path -LiteralPath $YtDlp -PathType Leaf) -or -not (Test-Path -LiteralPath $Ffmpeg -PathType Leaf)) {
     Write-Err "Не найдены yt-dlp.exe / ffmpeg.exe в текущей папке."
     Write-Info "Запустите: .\ytdlp.ps1 -Setup  (или положите файлы вручную)"
     exit 2
 }
 
 # ffprobe is optional for downloading (only used for media analysis/diagnostics)
-if (-not (Test-Path -LiteralPath $Ffprobe)) {
-    Write-Warn "ffprobe.exe не найден — некоторые функции анализа недоступны (скачивание будет работать)."
+if (-not (Test-Path -LiteralPath $Ffprobe -PathType Leaf)) {
+    Write-Warn "ffprobe.exe не найден - некоторые функции анализа недоступны (скачивание будет работать)."
 }
 
-if (-not (Test-Path -LiteralPath $Cookies)) {
-    Write-Err "Не найден cookies-youtube.txt — для YouTube это часто обязательно."
+if (-not (Test-Path -LiteralPath $Cookies -PathType Leaf)) {
+    Write-Err "Не найден cookies-youtube.txt - для YouTube это часто обязательно."
     Write-Info "Положите cookies-youtube.txt в текущую папку и повторите."
     Write-Link "Плагин cookies.txt" $Links['Cookie exporter (Chrome/Edge extension)']
     exit 3
@@ -854,7 +885,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
         $mergeFormat = 'mkv'
     }
 
-    & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
+    & $YtDlp --ignore-config --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
         -f $format `
         --merge-output-format $mergeFormat `
@@ -862,12 +893,19 @@ if ($PSCmdlet.ParameterSetName -eq 'Full') {
         $Url
 
     $exitCode = $LASTEXITCODE
-    if ($exitCode -eq 0) {
+    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $outFile -PathType Leaf) -and (Get-Item -LiteralPath $outFile).Length -gt 0) {
         Write-Host ""
         Write-Ok "Скачивание завершено успешно: $(Split-Path -Leaf $outFile)"
+    } elseif ($exitCode -eq 0) {
+        # Exit 0 without the promised (non-empty) file must not be reported as success
+        Write-Host ""
+        Write-Err "yt-dlp завершился без ошибки, но ожидаемый файл не появился или пуст: $(Split-Path -Leaf $outFile)"
+        Write-Info "Частая причина - устаревший yt-dlp. Обновление: .\ytdlp.ps1 -Setup -Force"
+        $exitCode = 6
     } else {
         Write-Host ""
         Write-Err "Скачивание завершилось с ошибкой (код: $exitCode)"
+        Write-Info "Частая причина - устаревший yt-dlp. Обновление: .\ytdlp.ps1 -Setup -Force"
     }
     exit $exitCode
 }
@@ -884,8 +922,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
 
     # 'bv' = best VIDEO-ONLY format (no audio), honouring the "без аудио" contract.
     # 'bv*' would allow a video format that also carries audio.
-    & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
+    # --no-mtime: keep download-time mtime so result detection below (LastWriteTime)
+    # stays reliable even with yt-dlp versions that default to upload-date mtime.
+    & $YtDlp --ignore-config --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
+        --no-mtime `
         -f 'bv' `
         -o $outTemplate `
         $Url
@@ -896,17 +937,21 @@ if ($PSCmdlet.ParameterSetName -eq 'Video') {
         # Find file modified after download start with matching base name
         # Using -Filter for performance in large directories
         # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "$baseName.*" -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -ge $startTime } |
+        # Sort newest-first and skip downloader leftovers so the real media file is picked
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Force -Filter "$baseName.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $startTime -and $_.Extension -notin @('.part', '.ytdl') } |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
-            Write-Ok "Скачивание завершено успешно"
+            # Exit 0 but no matching new file found - do not paint it green
+            Write-Warn "yt-dlp завершился без ошибки, но новый файл с ожидаемым именем не найден - проверьте папку."
         }
     } else {
         Write-Host ""
         Write-Err "Скачивание завершилось с ошибкой (код: $exitCode)"
+        Write-Info "Частая причина - устаревший yt-dlp. Обновление: .\ytdlp.ps1 -Setup -Force"
     }
     exit $exitCode
 }
@@ -924,8 +969,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
     # 251 = Opus ~160k (usually best YouTube audio); 'ba' = best audio-only;
     # 'b' = best combined as last resort (some sites lack audio-only formats).
     # Note: 'ba' and 'bestaudio' are the same alias, so the old third fallback was dead.
-    & $YtDlp --ffmpeg-location $WorkDir --cookies $Cookies `
+    # --no-mtime: keep download-time mtime so result detection below (LastWriteTime)
+    # stays reliable even with yt-dlp versions that default to upload-date mtime.
+    & $YtDlp --ignore-config --ffmpeg-location $WorkDir --cookies $Cookies `
         --no-playlist `
+        --no-mtime `
         -f '251/ba/b' `
         -o $outTemplate `
         $Url
@@ -936,17 +984,21 @@ if ($PSCmdlet.ParameterSetName -eq 'Audio') {
         # Find file modified after download start with matching base name
         # Using -Filter for performance in large directories
         # Using LastWriteTime instead of CreationTime (more reliable after rename/overwrite)
-        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Filter "$baseName.*" -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -ge $startTime } |
+        # Sort newest-first and skip downloader leftovers so the real media file is picked
+        $actualFile = @(Get-ChildItem -LiteralPath $WorkDir -File -Force -Filter "$baseName.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $startTime -and $_.Extension -notin @('.part', '.ytdl') } |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1)
         if ($actualFile) {
             Write-Ok "Скачивание завершено успешно: $($actualFile.Name)"
         } else {
-            Write-Ok "Скачивание завершено успешно"
+            # Exit 0 but no matching new file found - do not paint it green
+            Write-Warn "yt-dlp завершился без ошибки, но новый файл с ожидаемым именем не найден - проверьте папку."
         }
     } else {
         Write-Host ""
         Write-Err "Скачивание завершилось с ошибкой (код: $exitCode)"
+        Write-Info "Частая причина - устаревший yt-dlp. Обновление: .\ytdlp.ps1 -Setup -Force"
     }
     exit $exitCode
 }

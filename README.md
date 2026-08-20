@@ -2,7 +2,7 @@
 
 **Простой и безопасный PowerShell скрипт для скачивания видео с YouTube в максимальном качестве**
 
-[![PowerShell](https://img.shields.io/badge/PowerShell-7%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+[![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
 
@@ -10,7 +10,7 @@
 
 - ✅ **Максимальное качество** - скачивает лучшие доступные видео и аудио потоки без перекодирования
 - 🔒 **Безопасность** - работает только в текущей папке, не изменяет системные файлы
-- 🎯 **Простота** - один скрипт, никаких системных зависимостей кроме PowerShell 7+
+- 🎯 **Простота** - один скрипт, никаких системных зависимостей кроме PowerShell 7.2+
 - 🚀 **Автоматическая установка** - скачивает все необходимые компоненты одной командой
 - 📦 **Портативность** - все файлы в одной папке, легко переносить
 - 🎨 **Красивый вывод** - цветные информативные сообщения с эмодзи
@@ -20,7 +20,7 @@
 ## 📋 Требования
 
 - **Windows 10/11**
-- **PowerShell 7+** ([скачать](https://github.com/PowerShell/PowerShell/releases))
+- **PowerShell 7.2+** ([скачать](https://github.com/PowerShell/PowerShell/releases))
 - **cookies-youtube.txt** - файл cookies для авторизации (см. Шаг 2)
 
 Компоненты yt-dlp, ffmpeg, ffprobe скрипт скачает автоматически!
@@ -47,7 +47,7 @@ Unblock-File .\ytdlp.ps1
 ```powershell
 $PSVersionTable.PSVersion
 ```
-Если версия ниже 7.0, [скачайте PowerShell 7](https://github.com/PowerShell/PowerShell/releases/latest) (файл `PowerShell-7.x.x-win-x64.msi`).
+Если версия ниже 7.2, [скачайте PowerShell 7](https://github.com/PowerShell/PowerShell/releases/latest) (файл `PowerShell-7.x.x-win-x64.msi`).
 
 </details>
 
@@ -240,7 +240,7 @@ YouTube периодически ротирует cookies. Просто повт
 - Выполняется **только если** локальная проверка выявила потенциальные проблемы
 - Если cookies выглядят корректно - онлайн-проверка пропускается для ускорения
 - Быстрая проверка работоспособности cookies на указанном URL (флаг `--skip-download`)
-- Если cookies не работают - показывает детальную инструкцию по их обновлению
+- Если ошибка похожа на проблему cookies - показывает детальную инструкцию по их обновлению (иначе честно сообщает, что причина может быть в другом)
 
 ### 4. Валидация URL
 - Проверка, что URL действительно ведет на YouTube
@@ -298,7 +298,7 @@ Set-ExecutionPolicy Bypass -Scope Process
 
 **Причина:** Используется Windows PowerShell 5.x вместо PowerShell 7+.
 
-**Проверка:** `$PSVersionTable.PSVersion` - должно быть 7.0+
+**Проверка:** `$PSVersionTable.PSVersion` - должно быть 7.2+
 
 **Решение:**
 1. [Скачайте PowerShell 7](https://github.com/PowerShell/PowerShell/releases/latest)
@@ -415,6 +415,7 @@ MKV (Matroska) - это контейнер, который:
 - ✅ Не перезаписывает файлы без флага `-Force`
 - ✅ Проверяет размер скачанных компонентов в режиме `-Setup` (защита от неполных загрузок)
 - ✅ Не скачивает плейлисты целиком (флаг `--no-playlist`)
+- ✅ Изолирован от личных конфигов yt-dlp (флаг `--ignore-config`): поведение скрипта всегда предсказуемо. Если вы держите настройки в `yt-dlp.conf` (прокси, лимиты скорости), они применяться не будут
 - ✅ Валидирует URL перед запуском yt-dlp
 - ✅ Использует `Set-StrictMode -Version Latest`
 - ✅ Все ошибки обрабатываются с понятными сообщениями
