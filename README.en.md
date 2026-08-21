@@ -473,7 +473,7 @@ The script is designed with safety in mind:
 - ✅ Isolated from personal yt-dlp configs (`--ignore-config`): a stray `yt-dlp.conf` cannot silently change behavior
 - ✅ Validates URLs before invoking yt-dlp
 - ✅ Uses `Set-StrictMode -Version Latest`
-- ✅ Reports honestly: "success" without an actual output file is impossible
+- ✅ Reports honestly: in default and `-Mp4` modes, "success" without an actual output file is impossible (in `-Video`/`-Audio` a missing file produces a warning with exit code `0`)
 
 Found a vulnerability? Please report it privately - see [SECURITY.md](SECURITY.md).
 
