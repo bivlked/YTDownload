@@ -5,7 +5,9 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 проект придерживается [семантического версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [2.1.0] - 2026-08-22
+
+Релиз надёжности и документации: изоляция от внешних конфигов, честная проверка результата, полный второй раунд ревью кода и переработанная документация на двух языках.
 
 ### Изменено
 - **Минимальная версия PowerShell поднята до 7.2** (`#Requires -Version 7.2`). На 7.0/7.1 перенаправление stderr yt-dlp при `$ErrorActionPreference = 'Stop'` превращало первое же предупреждение в фатальную ошибку; в 7.2 это исправлено. Версии 7.0/7.1 давно не поддерживаются Microsoft.
@@ -82,6 +84,7 @@
 - Проверка актуальности версии yt-dlp через GitHub API.
 - Документация на русском языке, лицензия MIT.
 
+[2.1.0]: https://github.com/bivlked/YTDownload/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/bivlked/YTDownload/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/bivlked/YTDownload/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/bivlked/YTDownload/releases/tag/v1.0.0
