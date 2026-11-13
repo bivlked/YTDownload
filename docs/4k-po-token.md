@@ -49,8 +49,17 @@ YouTube регулярно меняет защиту, а yt-dlp за ней сл
 **Сервер (Docker):**
 
 ```powershell
-docker run --name bgutil-provider -d --restart unless-stopped --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
+docker run --name bgutil-provider -d --init -p 127.0.0.1:4416:4416 brainicism/bgutil-ytdlp-pot-provider
 ```
+
+> ⚠️ **Безопасность.** Публикуйте порт только на `127.0.0.1`, как в команде выше. Версии bgutil до 2.0.0 слушали все интерфейсы и уязвимы для удалённого выполнения кода ([GHSA-qpv9-8xfj-xx9m](https://github.com/Brainicism/bgutil-ytdlp-pot-provider/security/advisories/GHSA-qpv9-8xfj-xx9m)): запрос из локальной сети или со специально подготовленной страницы мог выполнить код на машине. Если контейнер ставили раньше по команде с `-p 4416:4416`, удалите его вместе со старым образом, затем запустите команду выше и заново скачайте плагин (следующий блок):
+
+```powershell
+docker rm -f bgutil-provider
+docker rmi brainicism/bgutil-ytdlp-pot-provider
+```
+
+Когда bgutil больше не нужен, уберите и контейнер (`docker rm -f bgutil-provider`), и плагин (`$env:APPDATA\yt-dlp\plugins\bgutil-ytdlp-pot-provider.zip`). Иначе yt-dlp при каждом запуске будет предупреждать, что не может достучаться до `127.0.0.1:4416`.
 
 **Плагин для yt-dlp (PowerShell):**
 
